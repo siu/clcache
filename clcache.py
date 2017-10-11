@@ -1665,8 +1665,8 @@ def processSingleSource(compiler, cmdLine, sourceFile, objectFile, environment):
 def processDirect(cache, objectFile, compiler, cmdLine, sourceFile):
     manifestHash = ManifestRepository.getManifestHash(compiler, cmdLine, sourceFile)
     manifestHit = None
-    manifest = cache.getManifest(manifestHash)
     with cache.manifestLockFor(manifestHash):
+        manifest = cache.getManifest(manifestHash)
         if manifest:
             for entryIndex, entry in enumerate(manifest.entries()):
                 # NOTE: command line options already included in hash for manifest name
