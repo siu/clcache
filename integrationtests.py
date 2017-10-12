@@ -807,18 +807,19 @@ class RunParallelBase:
 
     def testOutput(self):
         # type: () -> None
-        with cd(os.path.join(ASSETS_DIR, "parallel")), tempfile.TemporaryDirectory() as tempDir:
-            sources = glob.glob("*.cpp")
-            clcache.Cache(tempDir)
-            customEnv = self._createEnv(tempDir)
-            cmd = CLCACHE_CMD + ["/nologo", "/EHsc", "/c"]
-            mpFlag = "/MP" + str(len(sources))
-            out = subprocess.check_output(cmd + [mpFlag] + sources, env=customEnv).decode("ascii")
-            # print the output so that it shows up in py.test
-            print(out)
+        for _ in range(100):
+            with cd(os.path.join(ASSETS_DIR, "parallel")), tempfile.TemporaryDirectory() as tempDir:
+                sources = glob.glob("*.cpp")
+                clcache.Cache(tempDir)
+                customEnv = self._createEnv(tempDir)
+                cmd = CLCACHE_CMD + ["/nologo", "/EHsc", "/c"]
+                mpFlag = "/MP" + str(len(sources))
+                out = subprocess.check_output(cmd + [mpFlag] + sources, env=customEnv).decode("ascii")
+                # print the output so that it shows up in py.test
+                print(out)
 
-            for s in sources:
-                self.assertEqual(out.count(s), 1)
+                for s in sources:
+                    self.assertEqual(out.count(s), 1)
 
 class TestRunParallel(RunParallelBase, unittest.TestCase):
     env = dict(os.environ)
