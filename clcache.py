@@ -17,6 +17,7 @@ import errno
 import hashlib
 import json
 import multiprocessing
+import msvcrt
 import os
 import pickle
 import re
@@ -31,6 +32,7 @@ VERSION = "4.1.0-dev"
 HashAlgorithm = hashlib.md5
 
 OUTPUT_LOCK = threading.Lock()
+PROCESS_LOCK = threading.Lock()
 
 # try to use os.scandir or scandir.scandir
 # fall back to os.listdir if not found
@@ -67,6 +69,7 @@ BASEDIR_REPLACEMENT = '?'
 # Define some Win32 API constants here to avoid dependency on win32pipe
 NMPWAIT_WAIT_FOREVER = wintypes.DWORD(0xFFFFFFFF)
 ERROR_PIPE_BUSY = 231
+HANDLE_FLAG_INHERIT = 1
 
 # ManifestEntry: an entry in a manifest file
 # `includeFiles`: list of paths to include files, which this source file uses
@@ -1324,13 +1327,26 @@ def invokeRealCompiler(compilerBinary, cmdLine, captureOutput=False, outputAsStr
     if captureOutput:
         # Don't use subprocess.communicate() here, it's slow due to internal
         # threading.
-        with TemporaryFile() as stdoutFile, TemporaryFile() as stderrFile:
+        with PROCESS_LOCK:
+            stdoutFile = TemporaryFile()
+            stderrFile = TemporaryFile()
+
+            # Make temporary file handles non-inheritable, this is a workaround to
+            # a problem in Python 3.3
+            windll.kernel32.SetHandleInformation(msvcrt.get_osfhandle(stdoutFile.fileno()), HANDLE_FLAG_INHERIT, 0)
+            windll.kernel32.SetHandleInformation(msvcrt.get_osfhandle(stderrFile.fileno()), HANDLE_FLAG_INHERIT, 0)
+
             compilerProcess = subprocess.Popen(realCmdline, stdout=stdoutFile, stderr=stderrFile, env=environment)
-            returnCode = compilerProcess.wait()
-            stdoutFile.seek(0)
-            stdout = stdoutFile.read()
-            stderrFile.seek(0)
-            stderr = stderrFile.read()
+
+            try:
+                returnCode = compilerProcess.wait()
+                stdoutFile.seek(0)
+                stdout = stdoutFile.read()
+                stderrFile.seek(0)
+                stderr = stderrFile.read()
+            finally:
+                stdoutFile.close()
+                stderrFile.close()
     else:
         returnCode = subprocess.call(realCmdline, env=environment)
 
