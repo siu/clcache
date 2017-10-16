@@ -1338,15 +1338,15 @@ def invokeRealCompiler(compilerBinary, cmdLine, captureOutput=False, outputAsStr
 
             compilerProcess = subprocess.Popen(realCmdline, stdout=stdoutFile, stderr=stderrFile, env=environment)
 
-            try:
-                returnCode = compilerProcess.wait()
-                stdoutFile.seek(0)
-                stdout = stdoutFile.read()
-                stderrFile.seek(0)
-                stderr = stderrFile.read()
-            finally:
-                stdoutFile.close()
-                stderrFile.close()
+        try:
+            returnCode = compilerProcess.wait()
+            stdoutFile.seek(0)
+            stdout = stdoutFile.read()
+            stderrFile.seek(0)
+            stderr = stderrFile.read()
+        finally:
+            stdoutFile.close()
+            stderrFile.close()
     else:
         returnCode = subprocess.call(realCmdline, env=environment)
 
