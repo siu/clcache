@@ -19,6 +19,7 @@ from clcache import __main__ as clcache
 
 from clcache.__main__ import (
     CommandLineAnalyzer,
+    CompilerArtifacts,
     CompilerArtifactsRepository,
     Configuration,
     Manifest,
@@ -54,6 +55,16 @@ def temporaryFileName():
     with tempfile.NamedTemporaryFile() as f:
         return f.name
 
+
+def getDirectorySize(dirPath):
+    def filesize(path, filename):
+        return os.stat(os.path.join(path, filename)).st_size
+
+    size = 0
+    for path, _, filenames in clcache.WALK(dirPath):
+        size += sum(filesize(path, f) for f in filenames)
+
+    return size
 
 class TestHelperFunctions(unittest.TestCase):
     def testBasenameWithoutExtension(self):
@@ -224,16 +235,6 @@ class TestManifestRepository(unittest.TestCase):
     # Size in (120, 240] bytes
     manifest2 = Manifest([entry2])
 
-    def _getDirectorySize(self, dirPath):
-        def filesize(path, filename):
-            return os.stat(os.path.join(path, filename)).st_size
-
-        size = 0
-        for path, _, filenames in clcache.WALK(dirPath):
-            size += sum(filesize(path, f) for f in filenames)
-
-        return size
-
     def testPaths(self):
         manifestsRootDir = os.path.join(ASSETS_DIR, "manifests")
         mm = ManifestRepository(manifestsRootDir)
@@ -327,19 +328,19 @@ class TestManifestRepository(unittest.TestCase):
             cleaningResultSize = mm.clean(240)
             # Only one of those manifests can be left
             self.assertLessEqual(cleaningResultSize, 240)
-            self.assertLessEqual(self._getDirectorySize(manifestsRootDir), 240)
+            self.assertLessEqual(getDirectorySize(manifestsRootDir), 240)
 
             cleaningResultSize = mm.clean(240)
             # The one remaining is remains alive
             self.assertLessEqual(cleaningResultSize, 240)
             self.assertGreaterEqual(cleaningResultSize, 120)
-            self.assertLessEqual(self._getDirectorySize(manifestsRootDir), 240)
-            self.assertGreaterEqual(self._getDirectorySize(manifestsRootDir), 120)
+            self.assertLessEqual(getDirectorySize(manifestsRootDir), 240)
+            self.assertGreaterEqual(getDirectorySize(manifestsRootDir), 120)
 
             cleaningResultSize = mm.clean(0)
             # All manifest are gone
             self.assertEqual(cleaningResultSize, 0)
-            self.assertEqual(self._getDirectorySize(manifestsRootDir), 0)
+            self.assertEqual(getDirectorySize(manifestsRootDir), 0)
 
 
 class TestCompilerArtifactsRepository(unittest.TestCase):
@@ -354,6 +355,58 @@ class TestCompilerArtifactsRepository(unittest.TestCase):
         # entry path
         self.assertEqual(cas.cachedObjectName("fdde59862785f9f0ad6e661b9b5746b7"), os.path.join(
             compilerArtifactsRepositoryRootDir, "fd", "fdde59862785f9f0ad6e661b9b5746b7", "object"))
+
+    def testClean(self):
+        with tempfile.TemporaryDirectory() as rootDir:
+            car = CompilerArtifactsRepository(rootDir)
+
+            with tempfile.TemporaryDirectory() as artifactsDir:
+                def write1KBFile(filePath):
+                    with open(filePath, 'wb') as f:
+                        f.truncate(1024)
+                objectPath = os.path.join(artifactsDir, 'object')
+                write1KBFile(objectPath)
+                objectHash = "0a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+                objectHash = "1a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+                objectHash = "2a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+                objectHash = "3a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+                objectHash = "4a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+                objectHash = "5a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+                objectHash = "6a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+                objectHash = "7a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+                objectHash = "8a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+                objectHash = "9a33738d88be7edbacef48e262bbb5bc"
+                car.section(objectHash).setEntry(objectHash, CompilerArtifacts(objectPath, "stdout", "stderr"))
+            
+            self.assertEqual(len(list(car.sections())), 10)
+
+            _, cleaningResultSize = car.clean(2000)
+            # Only one of those manifests can be left
+            self.assertLessEqual(cleaningResultSize, 2000)
+            self.assertLessEqual(getDirectorySize(rootDir), 2000)
+
+            self.assertEqual(len(list(car.sections())), 1)
+
+            _, cleaningResultSize = car.clean(1024)
+            # The one remaining is remains alive
+            self.assertLessEqual(cleaningResultSize, 1024)
+            self.assertGreaterEqual(cleaningResultSize, 120)
+            self.assertLessEqual(getDirectorySize(rootDir), 240)
+            self.assertGreaterEqual(getDirectorySize(rootDir), 120)
+
+            _, cleaningResultSize = car.clean(0)
+            # All manifest are gone
+            self.assertEqual(cleaningResultSize, 0)
+            self.assertEqual(getDirectorySize(rootDir), 0)
 
 
 class TestArgumentClasses(unittest.TestCase):
