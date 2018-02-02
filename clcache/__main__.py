@@ -187,6 +187,9 @@ class ManifestSection(object):
         self.manifestSectionDir = manifestSectionDir
         self.lock = CacheLock.forPath(self.manifestSectionDir)
 
+    def entries(self):
+        return (basenameWithoutExtension(f) for f in filesBeneath(self.manifestSectionDir))
+
     def manifestPath(self, manifestHash):
         return os.path.join(self.manifestSectionDir, manifestHash + ".json")
 
@@ -231,6 +234,36 @@ def allSectionsLocked(repository):
             section.lock.release()
 
 
+EntryInfo = namedtuple('EntryInfo', ['entryHash', 'section', 'accessDate', 'size'])
+
+
+def cleanSections(repository, maxSize, getEntryAtimeAndSize):
+    entryInfos = []
+    for section in repository.sections():
+        for entryHash in section.entries():
+            stat = getEntryAtimeAndSize(section, entryHash)
+            entryInfos.append(EntryInfo(entryHash, section, stat[0], stat[1]))
+
+    entryInfos.sort(key=lambda t: t.accessDate, reverse=True)
+
+    totalSize = sum(sectionInfo.size for sectionInfo in entryInfos)
+    sizeToRemove = totalSize - maxSize
+
+    removedObjectsSize = 0
+    i = 0
+    while sizeToRemove > removedObjectsSize and i < len(entryInfos):
+        info = entryInfos[i]
+        i += 1
+        with info.section.lock:
+            try:
+                # todo add try block
+                repository.removeEntry(info.entryHash)
+                removedObjectsSize += info.size
+            except OSError:
+                pass
+    return totalSize - removedObjectsSize
+
+
 class ManifestRepository(object):
     # Bump this counter whenever the current manifest file format changes.
     # E.g. changing the file format from {'oldkey': ...} to {'newkey': ...} requires
@@ -248,24 +281,43 @@ class ManifestRepository(object):
     def sections(self):
         return (ManifestSection(path) for path in childDirectories(self._manifestsRootDir))
 
-    def clean(self, maxManifestsSize):
+    def _clean(self, maxManifestsSize):
         manifestFileInfos = []
         for section in self.sections():
+            # TODO: Lock?
             for filePath in section.manifestFiles():
                 try:
-                    manifestFileInfos.append((os.stat(filePath), filePath))
+                    manifestFileInfos.append((os.stat(filePath), filePath, section))
                 except OSError:
                     pass
 
         manifestFileInfos.sort(key=lambda t: t[0].st_atime, reverse=True)
+        totalObjectsSize = sum((stat.st_size for stat, _, _ in manifestFileInfos))
+        sizeToRemove = totalObjectsSize - maxManifestsSize
 
-        remainingObjectsSize = 0
-        for stat, filepath in manifestFileInfos:
-            if remainingObjectsSize + stat.st_size <= maxManifestsSize:
-                remainingObjectsSize += stat.st_size
-            else:
-                os.remove(filepath)
-        return remainingObjectsSize
+        removedObjectsSize = 0
+        i = 0
+        while sizeToRemove > removedObjectsSize and i < len(manifestFileInfos):
+            stat, filepath, section = manifestFileInfos[i]
+            i += 1
+            with section.lock:
+                try:
+                    # todo add try block
+                    os.remove(filepath)
+                    removedObjectsSize += stat.st_size
+                except OSError:
+                    pass
+        return totalObjectsSize - removedObjectsSize
+
+    def clean(self, maxSize):
+        def getEntryAtimeAndSize(section, entryHash):
+            stat = os.stat(section.manifestPath(entryHash))
+            return stat.st_atime, stat.st_size
+        return cleanSections(self, maxSize, getEntryAtimeAndSize)
+
+    def removeEntry(self, entryKey):
+        section = self.section(entryKey)
+        os.remove(section.manifestPath(entryKey))
 
     @staticmethod
     def getManifestHash(compilerBinary, commandLine, sourceFile):
@@ -452,6 +504,12 @@ class CompilerArtifactsRepository(object):
 
         return len(objectInfos)-removedItems, currentSizeObjects
 
+    def _clean(self, maxSize):
+        def getEntryAtimeAndSize(section, entryHash):
+            stat = os.stat(section.manifestPath(entryHash))
+            return stat.st_atime, stat.st_size
+        return cleanSections(self, maxSize, getEntryAtimeAndSize)
+
     @staticmethod
     def computeKeyDirect(manifestHash, includesContentHash):
         # We must take into account manifestHash to avoid
@@ -568,7 +626,9 @@ class CacheFileStrategy(object):
         return self.manifestRepository.section(manifestHash).getManifest(manifestHash)
 
     def clean(self, stats, maximumSize):
-        currentSize = stats.currentCacheSize()
+        currentSize = 0
+        with stats:
+            currentSize = stats.currentCacheSize()
         if currentSize < maximumSize:
             return
 
@@ -620,8 +680,8 @@ class Cache(object):
     def statistics(self):
         return self.strategy.statistics
 
-    def clean(self, stats, maximumSize):
-        return self.strategy.clean(stats, maximumSize)
+    def clean(self, maximumSize):
+        return self.strategy.clean(self.statistics, maximumSize)
 
     @contextlib.contextmanager
     def lockFor(self, key):
@@ -1427,8 +1487,8 @@ def resetStatistics(cache):
 
 
 def cleanCache(cache):
-    with cache.lock, cache.statistics as stats, cache.configuration as cfg:
-        cache.clean(stats, cfg.maximumCacheSize())
+    with cache.configuration as cfg:
+        cache.clean(cfg.maximumCacheSize())
 
 
 def clearCache(cache):
