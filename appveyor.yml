@@ -58,6 +58,7 @@ install:
   # Install tool for uploading coverage data to codecov.io
   - pip install codecov
   - coverage --version
+  - codecov --version
 
   # Install dependencies for clcachesrv such that we can lint the source code
   - pip install -r server\requirements.txt
