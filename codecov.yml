@@ -1,2 +1,5 @@
 ignore:
   - "tests"
+
+fixes:
+    - "C:\\Python34\\Lib\\site-packages\\::"
